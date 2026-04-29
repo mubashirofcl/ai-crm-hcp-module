@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
-import { submitInteraction, resetForm } from '../../store/interactionSlice';
+import { submitInteraction, resetForm, updateFormField } from '../../store/interactionSlice';
 
 const useFieldFlash = (value) => {
   const [flash, setFlash] = useState(false);
@@ -21,48 +21,76 @@ const useFieldFlash = (value) => {
   return flash;
 };
 
-const FieldDisplay = ({ label, value, renderValue, isArray, emptyText = "Waiting for AI input..." }) => {
+const FieldDisplay = ({ label, fieldKey, value, type = "text", options = [] }) => {
+  const dispatch = useDispatch();
   const flash = useFieldFlash(value);
   
-  // Custom logic for boolean values (like follow_up_required)
-  let isEmpty = false;
-  if (isArray) {
-    isEmpty = !value || value.length === 0;
-  } else if (typeof value === 'boolean') {
-    isEmpty = value === null; // Initial state might be false, which is valid
+  const handleChange = (e) => {
+    let val = e.target.value;
+    if (type === "number") val = val ? parseInt(val) : "";
+    if (type === "boolean") val = val === "true" ? true : (val === "false" ? false : null);
+    if (type === "array") val = val.split(",").map(s => s.trim()).filter(Boolean);
+    dispatch(updateFormField({ field: fieldKey, value: val }));
+  };
+
+  const commonStyle = {
+    background: flash ? '#EEF2FF' : '#F8FAFC',
+    border: '1px solid #E2E8F0',
+    borderRadius: '8px',
+    padding: '10px 14px',
+    fontSize: '14px',
+    color: '#1E293B',
+    width: '100%',
+    transition: 'background-color 0.3s ease',
+    outline: 'none',
+    boxSizing: 'border-box',
+    fontFamily: 'inherit'
+  };
+
+  let inputElement;
+
+  if (type === "select") {
+    inputElement = (
+      <select value={value === null ? "" : value} onChange={handleChange} style={commonStyle}>
+        <option value="">Select...</option>
+        {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    );
+  } else if (type === "boolean") {
+    inputElement = (
+      <select value={value === null ? "" : value} onChange={handleChange} style={commonStyle}>
+        <option value="">Select...</option>
+        <option value="true">Yes</option>
+        <option value="false">No</option>
+      </select>
+    );
+  } else if (type === "array") {
+    inputElement = (
+      <input type="text" value={Array.isArray(value) ? value.join(", ") : value || ""} onChange={handleChange} style={commonStyle} placeholder="Comma separated..." />
+    );
+  } else if (type === "textarea") {
+    inputElement = (
+      <textarea value={value || ""} onChange={handleChange} style={{...commonStyle, minHeight: '80px', resize: 'vertical'}} placeholder="Enter notes..." />
+    );
   } else {
-    isEmpty = value === "" || value === null || value === undefined;
+    inputElement = (
+      <input type={type} value={value || ""} onChange={handleChange} style={commonStyle} />
+    );
   }
-  
+
   return (
     <div style={{ marginBottom: '16px' }}>
       <div style={{ fontSize: '12px', fontWeight: 500, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>
         {label}
       </div>
-      <div style={{
-        background: flash ? '#EEF2FF' : (isEmpty ? '#F1F5F9' : '#F8FAFC'),
-        border: isEmpty ? '1px dashed #CBD5E1' : '1px solid #E2E8F0',
-        borderRadius: '8px',
-        padding: '10px 14px',
-        fontSize: '14px',
-        color: isEmpty ? '#94A3B8' : '#1E293B',
-        minHeight: '40px',
-        fontStyle: isEmpty ? 'italic' : 'normal',
-        transition: 'background-color 0.3s ease',
-        display: 'flex',
-        flexWrap: 'wrap',
-        gap: '8px',
-        alignItems: 'center'
-      }}>
-        {isEmpty ? emptyText : (renderValue ? renderValue(value) : value)}
-      </div>
+      {inputElement}
     </div>
   );
 };
 
 const StructuredForm = () => {
   const dispatch = useDispatch();
-  const { formData, submitting, submitted, submitError } = useSelector(state => state.interactions);
+  const { formData, submitting, submitted, submitError, hcps } = useSelector(state => state.interactions);
   const [showToast, setShowToast] = useState(false);
 
   useEffect(() => {
@@ -75,39 +103,20 @@ const StructuredForm = () => {
     }
   }, [submitted, dispatch]);
 
+  // Auto-fill HCP name based on ID
+  useEffect(() => {
+    if (formData.hcp_id && (!formData.hcp_name || formData.hcp_name.startsWith("HCP ID:") || formData.hcp_name === "undefined undefined")) {
+      const hcp = hcps.find(h => h.id === parseInt(formData.hcp_id));
+      if (hcp) {
+        const nameToUse = hcp.full_name || hcp.name || `${hcp.first_name || ''} ${hcp.last_name || ''}`.trim();
+        dispatch(updateFormField({ field: 'hcp_name', value: nameToUse }));
+      }
+    }
+  }, [formData.hcp_id, formData.hcp_name, hcps, dispatch]);
+
   const handleSave = () => {
     if (formData.hcp_id) {
       dispatch(submitInteraction(formData));
-    }
-  };
-
-  const renderProducts = (products) => (
-    products.map((p, idx) => (
-      <span key={idx} style={{ background: '#EEF2FF', color: '#6366F1', padding: '4px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: 500 }}>
-        {p}
-      </span>
-    ))
-  );
-
-  const renderSentiment = (sentiment) => {
-    const s = sentiment?.toLowerCase() || '';
-    let bg = '#F1F5F9', color = '#64748B';
-    if (s === 'positive') { bg = '#DCFCE7'; color = '#16A34A'; }
-    if (s === 'negative') { bg = '#FEE2E2'; color = '#DC2626'; }
-    return (
-      <span style={{ background: bg, color: color, padding: '4px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: 600, textTransform: 'capitalize' }}>
-        {sentiment}
-      </span>
-    );
-  };
-
-  const formatDate = (dateStr) => {
-    if (!dateStr) return "";
-    try {
-      const d = new Date(dateStr);
-      return d.toLocaleString();
-    } catch {
-      return dateStr;
     }
   };
 
@@ -116,7 +125,7 @@ const StructuredForm = () => {
       
       {/* Banner */}
       <div style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '12px', marginBottom: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748B', fontSize: '13px', fontWeight: 500 }}>
-        This form is controlled by the AI Assistant &rarr;
+        You can now edit this form manually or use the AI Assistant &rarr;
       </div>
 
       {showToast && (
@@ -133,33 +142,41 @@ const StructuredForm = () => {
 
       {/* Section 1 */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
-        <FieldDisplay label="HCP Name" value={formData.hcp_name || (formData.hcp_id ? `HCP ID: ${formData.hcp_id}` : "")} />
-        <FieldDisplay label="Interaction Type" value={formData.interaction_type} />
-        <FieldDisplay label="Date & Time" value={formData.interaction_date} renderValue={formatDate} />
-        <FieldDisplay label="Duration" value={formData.duration_minutes} renderValue={v => `${v} minutes`} />
+        <FieldDisplay label="HCP Name" fieldKey="hcp_name" value={formData.hcp_name} />
+        <FieldDisplay label="Interaction Type" fieldKey="interaction_type" value={formData.interaction_type} type="select" options={[
+          {value: 'In-Person Visit', label: 'In-Person Visit'},
+          {value: 'Phone Call', label: 'Phone Call'},
+          {value: 'Email', label: 'Email'},
+          {value: 'Virtual Meeting', label: 'Virtual Meeting'},
+          {value: 'Conference', label: 'Conference'}
+        ]} />
+        <FieldDisplay label="Date" fieldKey="interaction_date" type="date" value={formData.interaction_date ? formData.interaction_date.split('T')[0] : ""} />
+        <FieldDisplay label="Duration (min)" fieldKey="duration_minutes" type="number" value={formData.duration_minutes} />
       </div>
 
-      <FieldDisplay label="Location" value={formData.location} />
+      <FieldDisplay label="Location" fieldKey="location" value={formData.location} />
 
       <div style={{ borderBottom: '1px solid #F1F5F9', margin: '24px 0' }}></div>
 
       {/* Section 2 */}
-      <FieldDisplay label="Products Discussed" value={formData.products_discussed} renderValue={renderProducts} isArray={true} />
+      <FieldDisplay label="Products Discussed" fieldKey="products_discussed" value={formData.products_discussed} type="array" />
       
-      <FieldDisplay label="Sentiment" value={formData.sentiment} renderValue={renderSentiment} />
+      <FieldDisplay label="Sentiment" fieldKey="sentiment" value={formData.sentiment} type="select" options={[
+        {value: 'Positive', label: 'Positive'},
+        {value: 'Neutral', label: 'Neutral'},
+        {value: 'Negative', label: 'Negative'}
+      ]} />
 
-      <FieldDisplay label="Notes" value={formData.notes} />
+      <FieldDisplay label="Notes" fieldKey="notes" value={formData.notes} type="textarea" />
 
       <div style={{ borderBottom: '1px solid #F1F5F9', margin: '24px 0' }}></div>
 
       {/* Section 3 */}
-      <FieldDisplay label="Next Steps" value={formData.next_steps} />
+      <FieldDisplay label="Next Steps" fieldKey="next_steps" value={formData.next_steps} />
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
-        <FieldDisplay label="Follow-up Required" value={formData.follow_up_required === null ? "" : (formData.follow_up_required ? "Yes" : "No")} />
-        {formData.follow_up_required && (
-          <FieldDisplay label="Follow-up Date" value={formData.follow_up_date} />
-        )}
+        <FieldDisplay label="Follow-up Required" fieldKey="follow_up_required" value={formData.follow_up_required} type="boolean" />
+        <FieldDisplay label="Follow-up Date" fieldKey="follow_up_date" value={formData.follow_up_date || ""} type="date" />
       </div>
 
       <button 
